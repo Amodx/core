@@ -5,7 +5,7 @@ export const Compressor = {
   core: CompressorCore,
   version: 0.0,
   async compressArray(array: TypedArrays) {
-    const returnArray = await this.core.compressArrayBuffer(array.buffer);
+    const returnArray = await this.core.compressArrayBuffer(array.buffer as any);
     return returnArray;
   },
   async decompressArray(buffer: ArrayBuffer, type: TypeArraysNames) {

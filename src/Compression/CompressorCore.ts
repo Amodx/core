@@ -52,7 +52,7 @@ export default {
   },
 
   processArray(type: TypeArraysNames, array: Uint8Array) {
-    const returnArray = this.getArray[type](array.buffer);
+    const returnArray = this.getArray[type](array.buffer as any);
     return returnArray;
   },
 
