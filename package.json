@@ -1,6 +1,6 @@
 {
  "name": "@amodx/core",
- "version": "0.0.21",
+ "version": "0.0.22",
  "module": "index.js",
  "types": "index.d.ts",
  "type": "module",
