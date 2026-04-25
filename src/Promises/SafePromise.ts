@@ -3,7 +3,7 @@ import { Observable } from "../Observers/index";
 export type SafePromiseFunction<T> = (
   resolve: (data: T) => void,
   reject: (data: any) => void,
-  promise: SafePromise
+  promise: SafePromise,
 ) => void;
 
 export class SafePromiseDiedError extends Error {
@@ -22,7 +22,8 @@ export class SafePromise<T = any> {
   private _reject: Function;
   private startTime = 0;
   private elapsed = 0;
-  private canceled = false;
+  isCanceled = false;
+  private ran = false;
 
   private _isResolved = false;
   private _isRejected = false;
@@ -38,7 +39,7 @@ export class SafePromise<T = any> {
   constructor(
     public id: string,
     run: SafePromiseFunction<T>,
-    public dieTimeOut: number | null = null
+    public dieTimeOut: number | null = null,
   ) {
     this._run = run;
   }
@@ -50,14 +51,50 @@ export class SafePromise<T = any> {
     return this._isRejected;
   }
 
+  waitTillDone() {
+    if (!this.ran) return false;
+    if (this.isRejected() || this.isRejected() || this.isCanceled) return false;
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const sub = Symbol("");
+    const unSub = () => {
+      this.observers.resolved.unsubscribe(sub);
+      this.observers.rejected.unsubscribe(sub);
+      this.observers.canceled.unsubscribe(sub);
+      this.observers.error.unsubscribe(sub);
+    };
+
+    this.observers.resolved.subscribe(sub, () => {
+      resolve(true);
+      unSub();
+    });
+    this.observers.rejected.subscribe(sub, () => {
+      reject(false);
+      unSub();
+    });
+    this.observers.canceled.subscribe(sub, () => {
+      reject(false);
+      unSub();
+    });
+    this.observers.error.subscribe(sub, () => {
+      reject(false);
+      unSub();
+    });
+    this.observers.died.subscribe(sub, () => {
+      reject(false);
+      unSub();
+    });
+    return promise;
+  }
   resolve(data: T) {
+    if (!this.ran) return;
     this.clearDieTimer();
     this._isResolved = true;
     this.observers.resolved.notify(data);
     this._resolve(data);
   }
 
-  rejecT(data: any) {
+  reject(data: any) {
+    if (!this.ran) return;
     this.clearDieTimer();
     this._reject(data);
     this._isRejected = true;
@@ -65,6 +102,8 @@ export class SafePromise<T = any> {
   }
 
   pause() {
+    if (!this.ran) return;
+
     if (this.paused) return;
     this.paused = true;
     this.clearDieTimer();
@@ -74,11 +113,13 @@ export class SafePromise<T = any> {
     this.startTime = now;
   }
   resume() {
+    if (!this.ran) return;
+
     if (!this.paused) return;
     this.paused = false;
     if (this.dieTimeOut !== null) {
       this.setDie(
-        this.dieTimeOut - this.elapsed > 0 ? this.dieTimeOut - this.elapsed : 0
+        this.dieTimeOut - this.elapsed > 0 ? this.dieTimeOut - this.elapsed : 0,
       );
     }
   }
@@ -87,7 +128,12 @@ export class SafePromise<T = any> {
     if (timeOut === null) return;
     this.clearDieTimer();
     this.dieTimer = setTimeout(() => {
-      if (this.paused || this.canceled || this._isResolved || this._isRejected)
+      if (
+        this.paused ||
+        this.isCanceled ||
+        this._isResolved ||
+        this._isRejected
+      )
         return;
       const error = new SafePromiseDiedError(this);
       this.observers.died.notify(error);
@@ -101,33 +147,33 @@ export class SafePromise<T = any> {
   }
 
   cancel() {
-    if (this._isResolved || this._isRejected || this.canceled) return; // Prevent double settling
-    this.canceled = true;
-    this.clearDieTimer();
-    this._resolve(false); // Reject with an Error
-    this._isResolved = true;
+    if (!this.ran) return;
+    if (this._isResolved || this._isRejected || this.isCanceled) return;
+    this.isCanceled = true;
+    this.observers.canceled.notify();
+    this.resolve(null as any);
   }
 
   run(): Promise<T> {
-    const prom = new Promise<T>((resolve, reject) => {
-      this.startTime = performance.now();
-      this._resolve = resolve;
-      this._reject = reject;
-      this.setDie();
-      this._run(
-        (data: T) => this.resolve(data),
-        (data: any) => this.rejecT(data),
-        this
-      );
-    });
-    prom.catch((error) => {
+    const { promise, resolve, reject } = Promise.withResolvers();
+    this.startTime = performance.now();
+    this._resolve = resolve;
+    this._reject = reject;
+    this.ran = true;
+    this.setDie();
+    this._run(
+      (data: T) => this.resolve(data),
+      (data: any) => this.reject(data),
+      this,
+    );
+    promise.catch((error) => {
       this.observers.error.notify(error);
       throw new Error(error);
     });
-    prom.finally(() => {
+    promise.finally(() => {
       this.clearDieTimer();
       this.observers.finally.notify();
     });
-    return prom;
+    return promise as Promise<T>;
   }
 }
